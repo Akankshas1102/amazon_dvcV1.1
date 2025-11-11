@@ -29,37 +29,34 @@ def get_sqlite_connection():
 def get_building_time(building_id: int) -> dict | None:
     with get_sqlite_connection() as conn:
         cursor = conn.execute(
-            "SELECT start_time, end_time FROM building_times WHERE building_id = ?",
+            "SELECT start_time FROM building_times WHERE building_id = ?",
             (building_id,)
         )
         row = cursor.fetchone()
         return dict(row) if row else None
 
-def set_building_time(building_id: int, start_time: str, end_time: str | None) -> bool:
+def set_building_time(building_id: int, start_time: str) -> bool:
     """
-    UPDATED: Ensures start and end times are correctly inserted or updated.
+    Sets only the start time for a building schedule.
     """
     try:
         with get_sqlite_connection() as conn:
-            # First, check if the building exists
             cursor = conn.execute("SELECT building_id FROM building_times WHERE building_id = ?", (building_id,))
             exists = cursor.fetchone()
 
             if exists:
-                # If it exists, perform an UPDATE
                 conn.execute("""
                     UPDATE building_times
-                    SET start_time = ?, end_time = ?, updated_at = CURRENT_TIMESTAMP
+                    SET start_time = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE building_id = ?
-                """, (start_time, end_time, building_id))
-                logger.info(f"Updated schedule for building {building_id} to {start_time} - {end_time}")
+                """, (start_time, building_id))
+                logger.info(f"Updated schedule for building {building_id} to start at {start_time}")
             else:
-                # If it does not exist, perform an INSERT
                 conn.execute("""
-                    INSERT INTO building_times (building_id, start_time, end_time)
-                    VALUES (?, ?, ?)
-                """, (building_id, start_time, end_time))
-                logger.info(f"Inserted new schedule for building {building_id}: {start_time} - {end_time}")
+                    INSERT INTO building_times (building_id, start_time)
+                    VALUES (?, ?)
+                """, (building_id, start_time))
+                logger.info(f"Inserted new schedule for building {building_id}: start at {start_time}")
         return True
     except Exception as e:
         logger.error(f"Error setting building time for ID {building_id}: {e}")
@@ -68,30 +65,25 @@ def set_building_time(building_id: int, start_time: str, end_time: str | None) -
 
 def get_all_building_times() -> dict:
     """
-    UPDATED: Ensures an empty dictionary is returned if no schedules are found.
+    Returns all building schedules.
     """
     with get_sqlite_connection() as conn:
-        cursor = conn.execute("SELECT building_id, start_time, end_time FROM building_times")
+        cursor = conn.execute("SELECT building_id, start_time FROM building_times")
         rows = cursor.fetchall()
-        # Explicitly check for rows before creating the dictionary
-        return {row["building_id"]: {"start_time": row["start_time"], "end_time": row["end_time"]} for row in rows} if rows else {}
+        return {row["building_id"]: {"start_time": row["start_time"]} for row in rows} if rows else {}
 
 # --- Ignored ProEvent Functions ---
 
-# --- THIS IS THE FIX ---
 def get_ignored_proevents() -> dict:
     """
-    UPDATED: Fetches all required columns, including 'building_frk',
-    so the logic in the services layer can correctly filter by building.
+    Fetches all ignored proevents with their building associations.
     """
     with get_sqlite_connection() as conn:
-        # 1. MODIFIED: Added 'building_frk' to the SELECT statement
         cursor = conn.execute("""
             SELECT proevent_id, building_frk, ignore_on_arm, ignore_on_disarm 
             FROM ignored_proevents
         """)
         rows = cursor.fetchall()
-        # 2. MODIFIED: Added 'building_frk' to the returned dictionary
         if not rows:
             return {}
             
@@ -102,9 +94,7 @@ def get_ignored_proevents() -> dict:
                 "ignore_on_disarm": bool(row["ignore_on_disarm"])
             } 
             for row in rows
-
         }
-# --- END OF FIX ---
 
 def set_proevent_ignore_status(proevent_id: int, building_frk: int, device_prk: int, ignore_on_arm: bool, ignore_on_disarm: bool) -> bool:
     """Set the ignore status for a specific proevent."""
@@ -141,27 +131,21 @@ def log_proevent_state(proevent_id: int, building_frk: int, state: str) -> bool:
         logger.error(f"Error logging ProEvent state for ID {proevent_id}: {e}")
         return False
 
-# --- NEW: Device State Snapshot Functions ---
+# --- Device State Snapshot Functions ---
 
 def save_snapshot(building_id: int, device_states: list[dict]) -> bool:
     """
     Saves a snapshot of device states for a building.
-    Deletes any pre-existing snapshot for this building first.
-    'device_states' should be a list of dicts: [{'id': 1001, 'state': 0}, ...]
     """
     try:
         with get_sqlite_connection() as conn:
-            # Clear the old snapshot for this building
             conn.execute("DELETE FROM device_state_snapshot WHERE building_id = ?", (building_id,))
             
-            # Prepare data for batch insert
-            # We use your logic: 0 = reactive, 1 = non-reactive
             snapshot_data = [
                 (building_id, device['id'], device['state'])
                 for device in device_states
             ]
             
-            # Insert the new snapshot
             conn.executemany("""
                 INSERT INTO device_state_snapshot (building_id, device_id, original_state)
                 VALUES (?, ?, ?)
@@ -175,7 +159,6 @@ def save_snapshot(building_id: int, device_states: list[dict]) -> bool:
 def get_snapshot(building_id: int) -> list[dict] | None:
     """
     Retrieves the device state snapshot for a given building.
-    Returns a list of dicts: [{'id': 1001, 'state': 0}, ...]
     """
     try:
         with get_sqlite_connection() as conn:
@@ -186,7 +169,6 @@ def get_snapshot(building_id: int) -> list[dict] | None:
             rows = cursor.fetchall()
             if not rows:
                 return None
-            # Format as list of dicts for the proserver service
             return [{"id": row["device_id"], "state": row["original_state"]} for row in rows]
     except Exception as e:
         logger.error(f"Error retrieving snapshot for building {building_id}: {e}")

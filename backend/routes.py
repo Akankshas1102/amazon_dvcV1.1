@@ -8,22 +8,20 @@ from models import (DeviceOut, DeviceActionRequest, DeviceActionSummaryResponse,
                    PanelStatus)
 from sqlite_config import (get_building_time, set_building_time,
                            get_ignored_proevents, set_proevent_ignore_status,
-                           get_all_building_times) # Import this helper
+                           get_all_building_times)
 from logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
-# --- Panel Status Endpoints (NOT IN NEW LOGIC) ---
-# These are "dummy" endpoints for the frontend.
-# Our new scheduler logic ignores this cache.
+# --- Panel Status Endpoints ---
 
 @router.get("/panel_status", response_model=PanelStatus)
 def get_panel_status():
     status = cache_service.get_cache_value('panel_armed')
     if status is None:
-        status = True # Default to armed
+        status = True
         cache_service.set_cache_value('panel_armed', status)
     return PanelStatus(armed=status)
 
@@ -34,7 +32,7 @@ def set_panel_status(status: PanelStatus):
     return status
 
 
-# --- Building and Device Routes (CRITICAL LOGIC) ---
+# --- Building and Device Routes ---
 
 @router.get("/buildings", response_model=list[BuildingOut])
 def list_buildings():
@@ -42,27 +40,19 @@ def list_buildings():
     Fetches real buildings from PROD DB and merges schedules from SQLite DB.
     """
     logger.info("API: Fetching all buildings...")
-    # This now calls our service that hits the PROD DB
     buildings_from_db = device_service.get_distinct_buildings() 
-    
-    # This gets all schedules from our local SQLite DB
     schedules_from_sqlite = get_all_building_times()
     
     buildings_out = []
     for b in buildings_from_db:
         building_id = b["id"]
-        # Get the saved schedule for this building
         schedule = schedules_from_sqlite.get(building_id)
-        
-        # Provide defaults if no schedule is saved
-        start_time = schedule.get("start_time", "09:00") if schedule else "09:00"
-        end_time = schedule.get("end_time", "17:00") if schedule else "17:00"
+        start_time = schedule.get("start_time", "20:00") if schedule else "20:00"
 
         buildings_out.append(BuildingOut(
             id=building_id,
             name=b["name"],
-            start_time=start_time,
-            end_time=end_time
+            start_time=start_time
         ))
     return buildings_out
 
@@ -76,80 +66,65 @@ def list_proevents(
 ):
     """
     Fetches real devices (proevents) from PROD DB and merges
-    ignore status from SQLite DB. This provides the state for colors.
+    ignore status from SQLite DB.
     """
     if building is None:
         raise HTTPException(status_code=400, detail="A building ID is required.")
         
-    # 1. Get Live Data (from PROD DB via our updated service)
-    # The 'proevents' list now contains 'reactive_state' (0 or 1)
     proevents = proevent_service.get_all_proevents_for_building(
         building_id=building, search=search, limit=limit, offset=offset
     )
     
-    # 2. Get Saved Config (from SQLite DB)
     ignored_proevents = get_ignored_proevents()
-    
     proevents_out = []
     
     for p in proevents:
-        # Get the ignore status from our local SQLite DB
         ignore_status = ignored_proevents.get(p["id"], {})
-        
-        # This is the logic for the color:
-        # 0 (Reactive) = "armed" (Red)
-        # 1 (Non-Reactive) = "disarmed" (Green)
-        # Note: Frontend expects 'armed' to be red, which aligns with 'Reactive' status (0) 
         state_str = "armed" if p["reactive_state"] == 0 else "disarmed"
         
         proevent_out = DeviceOut(
             id=p["id"],
             name=p["name"],
-            state=state_str,  # This determines the color
-            building_name=p.get("building_name", ""), # From the JOIN query
-            is_ignored=ignore_status.get("ignore_on_disarm", False) # From SQLite
+            state=state_str,
+            building_name=p.get("building_name", ""),
+            is_ignored=ignore_status.get("ignore_on_disarm", False)
         )
         proevents_out.append(proevent_out)
 
     return proevents_out
 
 
-# --- Schedule and Ignore Endpoints (CRITICAL LOGIC) ---
+# --- Schedule and Ignore Endpoints ---
 
 @router.get("/buildings/{building_id}/time")
 def get_building_scheduled_time(building_id: int):
-    # This correctly fetches from SQLite
     times = get_building_time(building_id)
     return {
         "building_id": building_id,
-        "start_time": times.get("start_time") if times else None,
-        "end_time": times.get("end_time") if times else None
+        "start_time": times.get("start_time") if times else None
     }
 
 @router.post("/buildings/{building_id}/time", response_model=BuildingTimeResponse)
 def set_building_scheduled_time(building_id: int, request: BuildingTimeRequest):
-    # This correctly saves to SQLite
     if request.building_id != building_id:
         raise HTTPException(400, "Building ID in path and body must match")
         
-    success = set_building_time(building_id, request.start_time, request.end_time)
+    success = set_building_time(building_id, request.start_time)
     if not success:
         raise HTTPException(500, "Failed to update building scheduled time")
     
     return BuildingTimeResponse(
         building_id=building_id,
         start_time=request.start_time,
-        end_time=request.end_time,
         updated=True
     )
 
 @router.post("/buildings/{building_id}/reevaluate")
 def reevaluate_building(building_id: int):
     """
-    Triggers our new scheduler logic for one building *right now*.
+    Triggers scheduler logic for one building immediately.
     """
     try:
-        # This calls our "state machine"
         proevent_service.reevaluate_building_state(building_id)
         return {"status": "success", "message": f"Building {building_id} re-evaluated."}
     except Exception as e:
@@ -161,16 +136,13 @@ def reevaluate_building(building_id: int):
 def manage_ignored_proevents_bulk(req: IgnoredItemBulkRequest):
     """
     Saves the ignore list to the local SQLite DB.
-    
-    FIX: Corrected item.ignore_on_disarm to item.ignore based on the updated models.py.
     """
     try:
         for item in req.items:
-            # item.ignore is the single flag sent from the frontend
             set_proevent_ignore_status(
                 item.item_id, item.building_frk, item.device_prk, 
-                ignore_on_arm=False, # We don't use this, set to False
-                ignore_on_disarm=item.ignore # Use the generalized 'ignore' flag
+                ignore_on_arm=False,
+                ignore_on_disarm=item.ignore
             )
         return {"status": "success"}
     except Exception as e:
@@ -178,12 +150,12 @@ def manage_ignored_proevents_bulk(req: IgnoredItemBulkRequest):
         raise HTTPException(500, "Failed to save ignore status")
 
 
-# --- Unused Endpoint (NOT IN NEW LOGIC) ---
+# --- Legacy Endpoint ---
 
 @router.post("/devices/action", response_model=DeviceActionSummaryResponse)
 def device_action(req: DeviceActionRequest):
     """
-    This endpoint is not used by the frontend.
+    Legacy endpoint - not used by frontend.
     """
     logger.warning(f"Legacy endpoint /devices/action called for building {req.building_id}")
     

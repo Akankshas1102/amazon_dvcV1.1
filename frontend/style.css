@@ -177,7 +177,6 @@ header h1 {
     align-items: center;
 }
 
-/* This is the class in your original HTML for the search */
 .item-search {
     flex: 1;
     padding: 8px 12px;
@@ -214,7 +213,6 @@ header h1 {
     cursor: not-allowed;
 }
 
-/* This is the class in your original HTML for the list */
 .items-list {
     list-style: none;
     padding: 0;
@@ -251,7 +249,7 @@ header h1 {
     height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
-    background-color: #9ca3af; /* Set a default color */
+    background-color: #9ca3af;
 }
 
 .ignore-alarm-label {
@@ -262,7 +260,7 @@ header h1 {
 }
 
 .state-unknown {
-    background-color: #f59e0b; /* This was in your file */
+    background-color: #f59e0b;
 }
 
 .building-status {

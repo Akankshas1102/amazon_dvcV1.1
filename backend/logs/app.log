@@ -1,0 +1,2 @@
+2025-11-07 15:38:39,735 - INFO - __main__ - Connecting to database... ensuring tables exist.
+2025-11-07 15:38:39,776 - INFO - __main__ - SQLite database tables verified successfully.

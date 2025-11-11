@@ -16,12 +16,11 @@ def init_sqlite_db():
         with sqlite3.connect(SQLITE_DB_PATH) as conn:
             logger.info("Connecting to database... ensuring tables exist.")
 
-            # Table for building schedules
+            # Table for building schedules (removed end_time)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS building_times (
                     building_id INTEGER PRIMARY KEY,
                     start_time TEXT NOT NULL,
-                    end_time TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
@@ -49,7 +48,7 @@ def init_sqlite_db():
                 )
             """)
             
-            # Table for our snapshots
+            # Table for snapshots
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS device_state_snapshot (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

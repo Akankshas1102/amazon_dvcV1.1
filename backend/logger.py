@@ -11,16 +11,12 @@ class StreamToLogger:
     def __init__(self, logger, log_level=logging.INFO):
         self.logger = logger
         self.log_level = log_level
-        self.linebuf = ''  # Buffer for incomplete lines
+        self.linebuf = ''
 
     def isatty(self):
         return False
 
     def write(self, buf):
-        """
-        Handles 'write' calls from print() or errors.
-        Buffers until newline, then logs the line.
-        """
         self.linebuf += buf
         if '\n' in self.linebuf:
             lines = self.linebuf.split('\n')
@@ -31,62 +27,76 @@ class StreamToLogger:
             self.linebuf = lines[-1]
 
     def flush(self):
-        """
-        Logs any remaining partial line when flushed.
-        """
         message = self.linebuf.strip()
         if message:
             self.logger.log(self.log_level, message)
         self.linebuf = ''
 
 
-# Global lock for thread-safe logging
 _log_lock = Lock()
 
 
 def get_logger(name):
     """
     Creates and returns a thread-safe logger that logs to both console and file.
-    The log file is stored under backend/logs/app.log.
+    FIXED: Now properly creates the logs directory and file.
     """
     logger = logging.getLogger(name)
 
     if not logger.hasHandlers():
-        # ✅ Ensure logs directory exists
-        log_dir = os.path.join(os.path.dirname(__file__), "logs")
-        os.makedirs(log_dir, exist_ok=True)
+        # Get the backend directory (where this logger.py file is located)
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Create logs directory path
+        log_dir = os.path.join(backend_dir, "logs")
+        
+        # CRITICAL FIX: Ensure the directory exists with proper permissions
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+            print(f" Log directory ensured at: {log_dir}")
+        except Exception as e:
+            print(f" Failed to create log directory: {e}")
+            # Fall back to current directory if backend/logs fails
+            log_dir = "."
+            print(f" Using fallback log directory: {log_dir}")
 
-        # ✅ Use correct path for log file
+        # Full path to log file
         log_file = os.path.join(log_dir, "app.log")
+        print(f" Log file will be created at: {log_file}")
 
-        # ✅ File handler with rotation
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=5 * 1024 * 1024,  # 5MB
-            backupCount=3,
-            delay=True,
-            encoding="utf-8"
-        )
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-        )
-        file_handler.setFormatter(formatter)
+        # File handler with rotation
+        try:
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=5 * 1024 * 1024,  # 5MB
+                backupCount=3,
+                encoding="utf-8"
+            )
+            formatter = logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+            )
+            file_handler.setFormatter(formatter)
+            
+            # Console handler for live logs
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
 
-        # ✅ Console handler for live logs
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-
-        # ✅ Wrap handler emit with a thread-safe lock
-        class ThreadSafeHandler(logging.Handler):
-            def emit(self, record):
-                with _log_lock:
-                    file_handler.emit(record)
-
-        safe_handler = ThreadSafeHandler()
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-
-        logger.setLevel(logging.DEBUG)
+            # Add both handlers
+            logger.addHandler(file_handler)
+            logger.addHandler(console_handler)
+            
+            logger.setLevel(logging.DEBUG)
+            
+            print(f"✅ Logger initialized successfully for {name}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create log handlers: {e}")
+            # At minimum, add console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s")
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+            logger.setLevel(logging.DEBUG)
 
     return logger
 
