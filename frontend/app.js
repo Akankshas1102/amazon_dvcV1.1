@@ -1,40 +1,99 @@
-// frontend/app.js
+// frontend/app.js - COMPLETE FIXED VERSION
+// ============================================
+// Replace your entire app.js with this file
+// ============================================
 
-// Check authentication BEFORE DOM loads
-(function() {
-    const token = localStorage.getItem('adminToken');
-    if (!token && window.location.pathname !== '/login') {
-        console.log('No token found, redirecting to login...');
-        window.location.replace('/login');
+// ============================================
+// AUTHENTICATION MANAGER
+// ============================================
+const AuthManager = {
+    token: null,
+    username: null,
+    
+    init() {
+        this.token = localStorage.getItem('adminToken');
+        this.username = localStorage.getItem('adminUsername');
+        
+        console.log('[Auth] Initialization:', {
+            hasToken: !!this.token,
+            username: this.username,
+            path: window.location.pathname
+        });
+        
+        // If no token and not on login page, redirect
+        if (!this.token && window.location.pathname !== '/login') {
+            console.log('[Auth] No token found, redirecting to login...');
+            window.location.replace('/login');
+            return false;
+        }
+        
+        // If token exists, verify it's valid
+        if (this.token && window.location.pathname !== '/login') {
+            console.log('[Auth] Token found, verifying...');
+            this.verifyToken().catch(() => {
+                console.log('[Auth] Token invalid, redirecting to login...');
+                this.clearAuth();
+                window.location.replace('/login');
+            });
+        }
+        
+        return true;
+    },
+    
+    async verifyToken() {
+        if (!this.token) throw new Error('No token');
+        
+        const response = await fetch('http://127.0.0.1:7070/api/admin/queries', {
+            headers: { 'Authorization': `Bearer ${this.token}` }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Token verification failed');
+        }
+        
+        console.log('[Auth] Token verified successfully');
+        return true;
+    },
+    
+    clearAuth() {
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminUsername');
+        this.token = null;
+        this.username = null;
+    },
+    
+    logout() {
+        if (confirm('Are you sure you want to logout?')) {
+            this.clearAuth();
+            window.location.replace('/login');
+        }
     }
-})();
+};
 
-document.addEventListener('DOMContentLoaded', () => {
-    App.initialize();
-});
+// Initialize auth BEFORE anything else
+if (!AuthManager.init()) {
+    console.log('[Auth] Stopping app initialization due to auth failure');
+} else {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('[App] DOM loaded, initializing app...');
+        App.initialize();
+    });
+}
 
+// ============================================
+// MAIN APPLICATION
+// ============================================
 const App = {
     API_BASE_URL: 'http://127.0.0.1:7070/api',
     BUILD_PAGE_SIZE: 100,
     allBuildings: [],
     selectedBuildingId: null,
     elements: {},
-    token: null,
-    username: null,
 
     initialize() {
-        // Double-check authentication
-        this.token = localStorage.getItem('adminToken');
-        this.username = localStorage.getItem('adminUsername');
+        console.log('[App] Initializing application...');
         
-        if (!this.token) {
-            console.log('No token in initialize, redirecting to login...');
-            window.location.replace('/login');
-            return;
-        }
-        
-        console.log('Token found, user:', this.username);
-
+        // Get all DOM elements
         this.elements.buildingsContainer = document.getElementById('deviceList');
         this.elements.loader = document.getElementById('loader');
         this.elements.notification = document.getElementById('notification');
@@ -50,29 +109,36 @@ const App = {
         this.elements.modalSearch = document.getElementById('modalSearch');
         this.elements.modalSelectAllBtn = document.getElementById('modalSelectAllBtn');
         this.elements.logoutBtn = document.getElementById('logoutBtn');
+        this.elements.usernameDisplay = document.getElementById('usernameDisplay');
+
+        // Verify all critical elements exist
+        if (!this.elements.buildingsContainer) {
+            console.error('[App] Critical element missing: deviceList');
+            this.showNotification('Application initialization failed', true);
+            return;
+        }
+
+        // Display username if element exists
+        if (this.elements.usernameDisplay && AuthManager.username) {
+            this.elements.usernameDisplay.textContent = `Logged in as: ${AuthManager.username}`;
+        }
 
         // Setup logout button
         if (this.elements.logoutBtn) {
-            this.elements.logoutBtn.addEventListener('click', () => this.logout());
+            this.elements.logoutBtn.addEventListener('click', () => AuthManager.logout());
         }
 
         this.setupBuildingSelector();
         this.loadAllBuildings();
-    },
-
-    logout() {
-        if (confirm('Are you sure you want to logout?')) {
-            localStorage.removeItem('adminToken');
-            localStorage.removeItem('adminUsername');
-            window.location.replace('/login');
-        }
+        
+        console.log('[App] Application initialized successfully');
     },
 
     showNotification(text, isError = false, timeout = 3000) {
         if (!this.elements.notification) return;
         const { notification } = this.elements;
         notification.textContent = text;
-        notification.style.backgroundColor = isError ? '#ef4444' : '#333';
+        notification.style.backgroundColor = isError ? '#ef4444' : '#22c55e';
         notification.classList.add('show');
         
         if (notification.timeoutId) {
@@ -85,47 +151,51 @@ const App = {
     },
 
     async apiRequest(endpoint, options = {}) {
+        console.log(`[API] Request: ${endpoint}`);
         const url = `${this.API_BASE_URL}/${endpoint}`;
         
-        // Add authentication header
         const headers = {
+            'Content-Type': 'application/json',
             ...options.headers
         };
         
-        // Only add auth header for admin endpoints
-        if (endpoint.startsWith('admin/')) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+        // Add auth header for admin endpoints
+        if (endpoint.startsWith('admin/') && AuthManager.token) {
+            headers['Authorization'] = `Bearer ${AuthManager.token}`;
         }
         
         try {
             if(this.elements.loader) this.elements.loader.style.display = 'block';
+            
             const response = await fetch(url, {
                 ...options,
                 headers
             });
             
             if (response.status === 401) {
-                // Token expired, redirect to login
+                console.log('[API] Unauthorized response, clearing auth...');
                 this.showNotification('Session expired. Please login again.', true);
                 setTimeout(() => {
-                    localStorage.removeItem('adminToken');
-                    localStorage.removeItem('adminUsername');
+                    AuthManager.clearAuth();
                     window.location.replace('/login');
                 }, 2000);
                 throw new Error('Unauthorized');
             }
             
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `Request failed with status ${response.status}` }));
+                const errorData = await response.json().catch(() => ({ 
+                    detail: `Request failed with status ${response.status}` 
+                }));
                 throw new Error(errorData.detail || `Request failed: ${response.status}`);
             }
+            
             const contentType = response.headers.get("content-type");
             if (contentType && contentType.includes("application/json")) {
                 return await response.json();
             }
             return {};
         } catch (error) {
-            console.error(`API request error for ${endpoint}:`, error);
+            console.error(`[API] Request error for ${endpoint}:`, error);
             this.showNotification(error.message || 'An unexpected error occurred', true);
             throw error;
         } finally {
@@ -143,7 +213,7 @@ const App = {
     setupBuildingSelector() {
         const { buildingSearch, buildingDropdown, clearFilter } = this.elements;
         if (!buildingSearch || !buildingDropdown || !clearFilter) {
-            console.error("Building selector elements not found!");
+            console.error("[App] Building selector elements not found!");
             return;
         }
 
@@ -230,7 +300,7 @@ const App = {
                 if (itemsList) itemsList.dataset.loaded = 'true';
             }
         } catch (error) {
-             console.error("Error auto-loading items for filtered building:", error);
+             console.error("[App] Error auto-loading items for filtered building:", error);
              const itemsList = card.querySelector('.items-list');
              if (itemsList) itemsList.innerHTML = '<li class="muted">Error loading items.</li>';
              const body = card.querySelector('.building-body');
@@ -250,7 +320,10 @@ const App = {
         this.selectedBuildingId = null;
 
         try {
+            console.log('[App] Loading all buildings...');
             this.allBuildings = await this.apiRequest('buildings');
+            console.log(`[App] Loaded ${this.allBuildings.length} buildings`);
+            
             if (this.allBuildings.length === 0) {
                  buildingsContainer.innerHTML = '<p class="muted">No buildings found.</p>';
             } else {
@@ -259,6 +332,7 @@ const App = {
                  });
             }
         } catch (error) {
+             console.error('[App] Failed to load buildings:', error);
              buildingsContainer.innerHTML = '<p class="muted">Failed to load buildings. Please try again later.</p>';
         }
     },
@@ -307,7 +381,7 @@ const App = {
         const itemSearch = card.querySelector('.item-search');
 
         if (!itemsList || !header || !body || !toggleBtn || !startTimeInput || !timeSaveBtn || !ignoreFlagsBtn || !itemSearch) {
-             console.error("Failed to find all elements within building card for ID:", buildingId);
+             console.error("[App] Failed to find all elements within building card for ID:", buildingId);
              card.style.opacity = '0.5';
              card.style.pointerEvents = 'none';
              return;
@@ -324,7 +398,7 @@ const App = {
                     body.style.display = 'block';
                     toggleBtn.textContent = '-';
                 } catch (error) {
-                     console.error(`Error loading items for building ${buildingId} on toggle:`, error);
+                     console.error(`[App] Error loading items for building ${buildingId} on toggle:`, error);
                      itemsList.innerHTML = '<li class="muted">Error loading proevents.</li>';
                      body.style.display = 'block';
                      toggleBtn.textContent = '-';
@@ -371,7 +445,7 @@ const App = {
                      this.allBuildings[buildingIndex].start_time = startTime;
                  }
             } catch (error) {
-                 console.error("Failed to save building schedule:", error);
+                 console.error("[App] Failed to save building schedule:", error);
             }
         });
 
@@ -396,7 +470,7 @@ const App = {
         const loader = card.querySelector('.building-loader');
 
         if (!itemsList || !loader) {
-             console.error("Missing itemsList or loader element in card for building:", buildingId);
+             console.error("[App] Missing itemsList or loader element in card for building:", buildingId);
              throw new Error("Card structure incomplete.");
         }
 
@@ -420,7 +494,7 @@ const App = {
                  });
             }
         } catch(error) {
-             console.error(`Error loading items for building ${buildingId}:`, error);
+             console.error(`[App] Error loading items for building ${buildingId}:`, error);
              itemsList.innerHTML = '<li class="muted">Error loading proevents. Please try again.</li>';
              throw error;
         }
@@ -433,7 +507,7 @@ const App = {
 
     createItem(item) {
         if (!item || typeof item.id === 'undefined' || typeof item.name === 'undefined') {
-             console.warn("Received invalid item data:", item);
+             console.warn("[App] Received invalid item data:", item);
              return null;
         }
 
@@ -492,7 +566,7 @@ const App = {
         if (!this.elements.ignoreModal || !this.elements.modalTitle || !this.elements.modalItemList ||
             !this.elements.modalConfirmBtn || !this.elements.modalCancelBtn || !this.elements.closeButton ||
             !this.elements.modalSearch || !this.elements.modalSelectAllBtn) {
-            console.error("Modal elements not found!");
+            console.error("[App] Modal elements not found!");
             this.showNotification("Error: Could not open ignore settings.", true);
             return;
         }
@@ -546,13 +620,13 @@ const App = {
                          `;
                          modalItemList.appendChild(div);
                      } else {
-                          console.warn("Skipping invalid item data in modal:", item);
+                          console.warn("[App] Skipping invalid item data in modal:", item);
                      }
                  });
                  modalConfirmBtn.disabled = false;
             }
         } catch (error) {
-             console.error("Error loading items into ignore modal:", error);
+             console.error("[App] Error loading items into ignore modal:", error);
              modalItemList.innerHTML = '<p class="muted">Error loading proevents. Please try again.</p>';
         }
         
@@ -611,7 +685,7 @@ const App = {
                          ignore: checkbox.checked
                      });
                  } else {
-                      console.warn("Skipping item with invalid data attributes during save:", itemEl);
+                      console.warn("[App] Skipping item with invalid data attributes during save:", itemEl);
                  }
             });
 
@@ -658,7 +732,7 @@ const App = {
                 closeModal();
 
             } catch (error) {
-                console.error("Failed to save ignore settings or re-evaluate:", error);
+                console.error("[App] Failed to save ignore settings or re-evaluate:", error);
                 modalConfirmBtn.disabled = false;
                 modalCancelBtn.disabled = false;
             }
@@ -694,6 +768,11 @@ const App = {
 
             if (modalItemList) modalItemList.innerHTML = '';
         };
+
+        modalConfirmBtn.__currentClickHandler__ = confirmHandler; 
+        modalConfirmBtn.addEventListener('click', confirmHandler);
+        
+        modalCancelBtn.__currentClickHandler__ = closeModal;
 
         modalConfirmBtn.__currentClickHandler__ = confirmHandler; 
         modalConfirmBtn.addEventListener('click', confirmHandler);
