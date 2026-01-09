@@ -23,25 +23,57 @@ const AdminPanel = {
             window.location.href = '/login';
             return;
         }
-
-        // Check if user is admin
-        if (!this.isAdmin) {
-            this.showNotification('Admin privileges required. Redirecting to main app...', 'error');
-            setTimeout(() => {
-                window.location.href = '/';
-            }, 2000);
-            return;
-        }
         
         // Display username
-        document.getElementById('username').textContent = this.username || 'Admin';
+        document.getElementById('username').textContent = this.username || 'User';
+        
+        // Setup navigation based on user role
+        this.setupNavigation();
         
         // Setup event listeners
         this.setupEventListeners();
         
-        // Load initial data
-        this.loadQueries();
-        this.loadUsers();
+        // Load initial data for first tab
+        const firstTab = this.isAdmin ? 'queries' : 'password';
+        this.loadInitialDataForTab(firstTab);
+    },
+    
+    setupNavigation() {
+        const navContainer = document.getElementById('adminNav');
+        navContainer.innerHTML = '';
+        
+        // Admin users see all tabs
+        if (this.isAdmin) {
+            navContainer.innerHTML = `
+                <button class="nav-tab active" data-tab="queries">Query Configuration</button>
+                <button class="nav-tab" data-tab="users">User Management</button>
+                <button class="nav-tab" data-tab="password">Change Password</button>
+            `;
+        } else {
+            // Regular users only see change password tab
+            navContainer.innerHTML = `
+                <button class="nav-tab active" data-tab="password">Change Password</button>
+            `;
+        }
+        
+        // Show/hide tab content based on role
+        document.getElementById('queries-tab').style.display = this.isAdmin ? 'block' : 'none';
+        document.getElementById('users-tab').style.display = this.isAdmin ? 'block' : 'none';
+        document.getElementById('password-tab').style.display = 'block';
+        
+        // Set active tab
+        if (!this.isAdmin) {
+            document.getElementById('queries-tab').classList.remove('active');
+            document.getElementById('password-tab').classList.add('active');
+        }
+    },
+    
+    loadInitialDataForTab(tabName) {
+        if (tabName === 'queries' && this.isAdmin) {
+            this.loadQueries();
+        } else if (tabName === 'users' && this.isAdmin) {
+            this.loadUsers();
+        }
     },
     
     setupEventListeners() {
@@ -53,21 +85,23 @@ const AdminPanel = {
             tab.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
         });
         
-        // Query editor buttons
-        document.getElementById('saveQueryBtn').addEventListener('click', () => this.saveQuery());
-        document.getElementById('cancelEditBtn').addEventListener('click', () => this.cancelEdit());
-        document.getElementById('loadDefaultBtn').addEventListener('click', () => this.loadDefaultQuery());
-        document.getElementById('testQueryBtn').addEventListener('click', () => this.testQuery());
+        // Query editor buttons (only if admin)
+        if (this.isAdmin) {
+            document.getElementById('saveQueryBtn').addEventListener('click', () => this.saveQuery());
+            document.getElementById('cancelEditBtn').addEventListener('click', () => this.cancelEdit());
+            document.getElementById('loadDefaultBtn').addEventListener('click', () => this.loadDefaultQuery());
+            document.getElementById('testQueryBtn').addEventListener('click', () => this.testQuery());
+            
+            // Query mode buttons
+            document.getElementById('basicModeBtn').addEventListener('click', () => this.switchQueryMode('basic'));
+            document.getElementById('advancedModeBtn').addEventListener('click', () => this.switchQueryMode('advanced'));
+            
+            // Create user form
+            document.getElementById('createUserForm').addEventListener('submit', (e) => this.createUser(e));
+        }
         
-        // Query mode buttons
-        document.getElementById('basicModeBtn').addEventListener('click', () => this.switchQueryMode('basic'));
-        document.getElementById('advancedModeBtn').addEventListener('click', () => this.switchQueryMode('advanced'));
-        
-        // Change password form
+        // Change password form (available to all users)
         document.getElementById('changePasswordForm').addEventListener('submit', (e) => this.changePassword(e));
-        
-        // Create user form
-        document.getElementById('createUserForm').addEventListener('submit', (e) => this.createUser(e));
     },
     
     switchTab(tabName) {
@@ -82,8 +116,10 @@ const AdminPanel = {
         });
 
         // Load data if needed
-        if (tabName === 'users') {
+        if (tabName === 'users' && this.isAdmin) {
             this.loadUsers();
+        } else if (tabName === 'queries' && this.isAdmin) {
+            this.loadQueries();
         }
     },
     
@@ -101,24 +137,60 @@ const AdminPanel = {
         // If switching modes with a loaded query, populate the appropriate form
         if (this.currentQuery) {
             if (mode === 'basic') {
-                this.populateBasicMode(this.currentQuery.query_sql);
+                this.populateBasicMode(this.currentQuery.query_sql, this.currentQuery.query_name);
             } else {
                 this.populateAdvancedMode(this.currentQuery.query_sql);
             }
         }
     },
     
-    populateBasicMode(querySQL) {
-        // Extract device type from panel_devices query
-        const deviceTypeMatch = querySQL.match(/dvcDeviceType_FRK\s*=\s*(\d+)/i);
-        if (deviceTypeMatch) {
-            document.getElementById('deviceType').value = deviceTypeMatch[1];
-        }
+    populateBasicMode(querySQL, queryName) {
+        // Hide all basic mode groups first
+        document.getElementById('deviceTypeGroup').style.display = 'none';
+        document.getElementById('mainTableGroup').style.display = 'none';
         
-        // Extract building table name
-        const buildingTableMatch = querySQL.match(/FROM\s+(\w+)/i);
-        if (buildingTableMatch) {
-            document.getElementById('buildingTableName').value = buildingTableMatch[1];
+        // Clear values
+        document.getElementById('deviceType').value = '';
+        document.getElementById('mainTableName').value = '';
+        
+        // Update info list
+        const infoList = document.getElementById('basicModeInfoList');
+        infoList.innerHTML = '';
+        
+        if (queryName === 'device') {
+            // Show device-specific fields
+            document.getElementById('deviceTypeGroup').style.display = 'block';
+            document.getElementById('mainTableGroup').style.display = 'block';
+            
+            // Extract device type
+            const deviceTypeMatch = querySQL.match(/dvcDeviceType_FRK\s*=\s*(\d+)/i);
+            if (deviceTypeMatch) {
+                document.getElementById('deviceType').value = deviceTypeMatch[1];
+            }
+            
+            // Extract main table (Device_TBL)
+            const tableMatch = querySQL.match(/FROM\s+(\w+)/i);
+            if (tableMatch) {
+                document.getElementById('mainTableName').value = tableMatch[1];
+            }
+            
+            infoList.innerHTML = `
+                <li><strong>Device Type:</strong> Numeric ID to filter devices (e.g., 138 for panels)</li>
+                <li><strong>Main Table:</strong> Should be Device_TBL or related device tables</li>
+            `;
+        } else if (queryName === 'building') {
+            // Show building-specific fields
+            document.getElementById('mainTableGroup').style.display = 'block';
+            
+            // Extract main table (Building_TBL)
+            const tableMatch = querySQL.match(/FROM\s+(\w+)/i);
+            if (tableMatch) {
+                document.getElementById('mainTableName').value = tableMatch[1];
+            }
+            
+            infoList.innerHTML = `
+                <li><strong>Main Table:</strong> Should be Building_TBL</li>
+            `;
         }
     },
     
@@ -195,6 +267,8 @@ const AdminPanel = {
     // ==================== QUERY MANAGEMENT ====================
     
     async loadQueries() {
+        if (!this.isAdmin) return;
+        
         const queryList = document.getElementById('queryList');
         queryList.innerHTML = '<div class="loader">Loading queries...</div>';
         
@@ -203,12 +277,28 @@ const AdminPanel = {
             
             queryList.innerHTML = '';
             
-            if (data.queries.length === 0) {
+            // Only show device and building queries
+            const queryTypes = ['device', 'building'];
+            const queriesToShow = data.queries.filter(q => queryTypes.includes(q.query_name));
+            
+            // Add defaults if not in database
+            queryTypes.forEach(queryName => {
+                if (!queriesToShow.find(q => q.query_name === queryName)) {
+                    queriesToShow.push({
+                        query_name: queryName,
+                        description: `Default ${queryName} query`,
+                        created_at: null,
+                        updated_at: null
+                    });
+                }
+            });
+            
+            if (queriesToShow.length === 0) {
                 queryList.innerHTML = '<p class="empty-state">No queries found</p>';
                 return;
             }
             
-            data.queries.forEach(query => {
+            queriesToShow.forEach(query => {
                 const queryItem = this.createQueryListItem(query);
                 queryList.appendChild(queryItem);
             });
@@ -226,9 +316,17 @@ const AdminPanel = {
         
         const isDefault = !query.updated_at;
         
+        // Friendly display names
+        const displayNames = {
+            'device': 'Device Query',
+            'building': 'Building Query'
+        };
+        
+        const displayName = displayNames[query.query_name] || query.query_name;
+        
         div.innerHTML = `
             <div class="query-item-header">
-                <h4>${query.query_name}${isDefault ? ' <span class="badge">Default</span>' : ''}</h4>
+                <h4>${displayName}${isDefault ? ' <span class="badge">Default</span>' : ''}</h4>
                 <span class="query-item-date">
                     ${query.updated_at ? `Updated: ${new Date(query.updated_at).toLocaleDateString()}` : 'Not customized'}
                 </span>
@@ -242,6 +340,8 @@ const AdminPanel = {
     },
     
     async loadQueryForEdit(queryName) {
+        if (!this.isAdmin) return;
+        
         try {
             const data = await this.apiRequest(`queries/${queryName}`);
             
@@ -253,14 +353,22 @@ const AdminPanel = {
             document.getElementById('loadDefaultBtn').style.display = 'inline-block';
             document.getElementById('testQueryBtn').style.display = 'inline-block';
             
+            // Friendly display names
+            const displayNames = {
+                'device': 'Device Query',
+                'building': 'Building Query'
+            };
+            
+            const displayName = displayNames[queryName] || queryName;
+            
             // Populate form
-            document.getElementById('editorTitle').textContent = `Editing: ${queryName}`;
+            document.getElementById('editorTitle').textContent = `Editing: ${displayName}`;
             document.getElementById('queryName').value = data.query_name;
             document.getElementById('queryDescription').value = data.description || '';
             
             // Start in basic mode by default
             this.switchQueryMode('basic');
-            this.populateBasicMode(data.query_sql);
+            this.populateBasicMode(data.query_sql, data.query_name);
             
             // Also populate advanced mode in background
             this.populateAdvancedMode(data.query_sql);
@@ -276,7 +384,7 @@ const AdminPanel = {
     },
     
     async loadDefaultQuery() {
-        if (!this.currentQuery) return;
+        if (!this.isAdmin || !this.currentQuery) return;
         
         if (!confirm('This will replace the current query with the default. Continue?')) {
             return;
@@ -286,7 +394,7 @@ const AdminPanel = {
             const data = await this.apiRequest(`queries/${this.currentQuery.query_name}/default`);
             
             if (this.queryMode === 'basic') {
-                this.populateBasicMode(data.query_sql);
+                this.populateBasicMode(data.query_sql, this.currentQuery.query_name);
             } else {
                 document.getElementById('querySQL').value = data.query_sql;
             }
@@ -299,7 +407,7 @@ const AdminPanel = {
     },
     
     async testQuery() {
-        if (!this.currentQuery) return;
+        if (!this.isAdmin || !this.currentQuery) return;
         
         const querySQL = this.buildQueryFromMode();
         
@@ -335,23 +443,26 @@ const AdminPanel = {
             return document.getElementById('querySQL').value.trim();
         } else {
             // Build query from basic mode inputs
+            const mainTableName = document.getElementById('mainTableName').value.trim();
             const deviceType = document.getElementById('deviceType').value.trim();
-            const buildingTable = document.getElementById('buildingTableName').value.trim();
             
             // Get current query SQL as template
             if (!this.currentQuery) return '';
             
             let querySQL = this.currentQuery.query_sql;
             
-            // Replace device type if provided
-            if (deviceType) {
-                querySQL = querySQL.replace(/dvcDeviceType_FRK\s*=\s*\d+/gi, `dvcDeviceType_FRK = ${deviceType}`);
+            // Replace table names if provided
+            if (mainTableName) {
+                if (this.currentQuery.query_name === 'device') {
+                    querySQL = querySQL.replace(/Device_TBL/gi, mainTableName);
+                } else if (this.currentQuery.query_name === 'building') {
+                    querySQL = querySQL.replace(/Building_TBL/gi, mainTableName);
+                }
             }
             
-            // Replace building table name if provided
-            if (buildingTable) {
-                // This is more complex - need to handle multiple occurrences
-                querySQL = querySQL.replace(/Building_TBL/gi, buildingTable);
+            // Replace device type if provided (only for device query)
+            if (deviceType && this.currentQuery.query_name === 'device') {
+                querySQL = querySQL.replace(/dvcDeviceType_FRK\s*=\s*\d+/gi, `dvcDeviceType_FRK = ${deviceType}`);
             }
             
             return querySQL;
@@ -359,7 +470,7 @@ const AdminPanel = {
     },
     
     async saveQuery() {
-        if (!this.currentQuery) return;
+        if (!this.isAdmin || !this.currentQuery) return;
         
         const queryName = document.getElementById('queryName').value;
         const queryDescription = document.getElementById('queryDescription').value.trim();
@@ -403,6 +514,8 @@ const AdminPanel = {
     },
     
     cancelEdit() {
+        if (!this.isAdmin) return;
+        
         if (confirm('Discard changes?')) {
             document.getElementById('queryEditor').style.display = 'none';
             document.getElementById('editorPlaceholder').style.display = 'flex';
@@ -420,6 +533,8 @@ const AdminPanel = {
     // ==================== USER MANAGEMENT ====================
     
     async loadUsers() {
+        if (!this.isAdmin) return;
+        
         const usersList = document.getElementById('usersList');
         usersList.innerHTML = '<div class="loader">Loading users...</div>';
         
@@ -482,6 +597,8 @@ const AdminPanel = {
     async createUser(event) {
         event.preventDefault();
         
+        if (!this.isAdmin) return;
+        
         const username = document.getElementById('newUsername').value.trim();
         const password = document.getElementById('newUserPassword').value;
         const isAdmin = document.getElementById('newUserIsAdmin').checked;
@@ -520,6 +637,8 @@ const AdminPanel = {
     },
     
     async toggleUserAdmin(userId, makeAdmin) {
+        if (!this.isAdmin) return;
+        
         const action = makeAdmin ? 'grant admin privileges to' : 'remove admin privileges from';
         
         if (!confirm(`Are you sure you want to ${action} this user?`)) {
@@ -543,6 +662,8 @@ const AdminPanel = {
     },
     
     async resetUserPassword(userId, username) {
+        if (!this.isAdmin) return;
+        
         const newPassword = prompt(`Enter new password for user '${username}':\n(Minimum 6 characters)`);
         
         if (!newPassword) return;
@@ -568,6 +689,8 @@ const AdminPanel = {
     },
     
     async deleteUser(userId, username) {
+        if (!this.isAdmin) return;
+        
         if (!confirm(`Are you sure you want to delete user '${username}'?\n\nThis action cannot be undone.`)) {
             return;
         }

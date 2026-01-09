@@ -81,34 +81,15 @@ def decrypt_query(encrypted_query: str) -> str:
 # ==================== DEFAULT QUERIES ====================
 # These are the queries that will be used if not overridden by admin
 
-DEFAULT_PANEL_DEVICES_QUERY = """
+# DEVICE QUERIES (Device_TBL is the main table)
+DEFAULT_DEVICE_QUERY = """
 SELECT dvcBuilding_FRK, dvcCurrentState_TXT
 FROM Device_TBL
 WHERE dvcDeviceType_FRK = 138
 """
 
-DEFAULT_BUILDING_NAME_QUERY = """
-SELECT bldBuildingName_TXT 
-FROM Building_TBL 
-JOIN Device_TBL ON dvcBuilding_FRK = Building_PRK 
-WHERE dvcCurrentState_TXT = 'AreaArmingStates.4' AND dvcBuilding_FRK = :building_id
-"""
-
-DEFAULT_PROEVENTS_QUERY = """
-SELECT
-    p.pevReactive_FRK,
-    p.ProEvent_PRK,
-    p.pevAlias_TXT,
-    b.bldBuildingName_TXT
-FROM
-    ProEvent_TBL AS p
-LEFT JOIN
-    Building_TBL AS b ON p.pevBuilding_FRK = b.Building_PRK
-WHERE
-    p.pevBuilding_FRK = :building_id
-"""
-
-DEFAULT_BUILDINGS_QUERY = """
+# BUILDING QUERIES (Building_TBL is the main table)
+DEFAULT_BUILDING_QUERY = """
 SELECT Building_PRK, bldBuildingName_TXT
 FROM Building_TBL
 """
@@ -149,10 +130,8 @@ def get_query(query_name: str) -> str:
 def get_default_query(query_name: str) -> str:
     """Get the default query for a given query name."""
     defaults = {
-        'panel_devices': DEFAULT_PANEL_DEVICES_QUERY,
-        'building_name': DEFAULT_BUILDING_NAME_QUERY,
-        'proevents': DEFAULT_PROEVENTS_QUERY,
-        'buildings': DEFAULT_BUILDINGS_QUERY
+        'device': DEFAULT_DEVICE_QUERY,
+        'building': DEFAULT_BUILDING_QUERY
     }
     return defaults.get(query_name, "")
 

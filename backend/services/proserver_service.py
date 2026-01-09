@@ -43,11 +43,13 @@ def send_armed_axe_message(building_id: int):
     Checks if a building panel is in ARMED state (AreaArmingStates.4).
     If yes, sends armed AXE alert to ProServer.
     """
-    query_sql = get_query('building_name')
-    
-    if not query_sql:
-        logger.error("❌ Query 'building_name' not found in configuration!")
-        return
+    # Using building query to get building name
+    query_sql = """
+        SELECT bldBuildingName_TXT 
+        FROM Building_TBL 
+        JOIN Device_TBL ON dvcBuilding_FRK = Building_PRK 
+        WHERE dvcCurrentState_TXT = 'AreaArmingStates.4' AND dvcBuilding_FRK = :building_id
+    """
     
     sql = text(query_sql)
     building_name = None
@@ -125,11 +127,20 @@ def get_proevents_for_building_from_db(building_id: int) -> list[dict]:
     """
     logger.info(f"[Building {building_id}] Fetching ProEvents from ProServer database...")
     
-    query_sql = get_query('proevents')
-    
-    if not query_sql:
-        logger.error("❌ Query 'proevents' not found in configuration!")
-        return []
+    # ProEvents query
+    query_sql = """
+        SELECT
+            p.pevReactive_FRK,
+            p.ProEvent_PRK,
+            p.pevAlias_TXT,
+            b.bldBuildingName_TXT
+        FROM
+            ProEvent_TBL AS p
+        LEFT JOIN
+            Building_TBL AS b ON p.pevBuilding_FRK = b.Building_PRK
+        WHERE
+            p.pevBuilding_FRK = :building_id
+    """
     
     sql = text(query_sql)
     results = []
@@ -222,10 +233,10 @@ def get_all_live_building_arm_states() -> dict:
     try:
         logger.debug("Fetching all building panel states from ProServer database...")
 
-        query_sql = get_query('panel_devices')
+        query_sql = get_query('device')
         
         if not query_sql:
-            logger.error("❌ Query 'panel_devices' not found in configuration!")
+            logger.error("❌ Query 'device' not found in configuration!")
             return {}
 
         with Session(engine) as session:
@@ -273,10 +284,10 @@ def get_all_distinct_buildings_from_db() -> list[dict]:
     """
     logger.info("Fetching all distinct buildings from ProServer database...")
     
-    query_sql = get_query('buildings')
+    query_sql = get_query('building')
     
     if not query_sql:
-        logger.error("❌ Query 'buildings' not found in configuration!")
+        logger.error("❌ Query 'building' not found in configuration!")
         return []
     
     sql = text(query_sql)

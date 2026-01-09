@@ -11,7 +11,11 @@
         <header>
             <h1>Amazon Device Control</h1>
             <div class="header-controls">
-                <a href="/login" class="admin-link">⚙️ Admin Login</a>
+                <span id="userInfo" style="display:none; margin-right: 10px; color: #64748b;">
+                    <strong id="currentUsername"></strong>
+                </span>
+                <a href="/login" id="loginLink" class="admin-link">⚙️ Admin Login</a>
+                <button id="logoutBtn" class="admin-link" style="display:none; cursor: pointer; border: 2px solid #ef4444; color: #ef4444;">🔓 Logout</button>
                 <div class="building-selector">
                     <input type="text" class="building-search" placeholder="Search buildings..." />
                     <button class="clear-filter" style="display:none;">&times;</button>

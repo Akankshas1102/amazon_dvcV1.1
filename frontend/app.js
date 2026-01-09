@@ -31,6 +31,10 @@ const App = {
         this.elements.closeButton = document.querySelector('.close-button');
         this.elements.modalSearch = document.getElementById('modalSearch');
         this.elements.modalSelectAllBtn = document.getElementById('modalSelectAllBtn');
+        this.elements.loginLink = document.getElementById('loginLink');
+        this.elements.logoutBtn = document.getElementById('logoutBtn');
+        this.elements.userInfo = document.getElementById('userInfo');
+        this.elements.currentUsername = document.getElementById('currentUsername');
 
         // Verify all critical elements exist
         if (!this.elements.buildingsContainer) {
@@ -39,10 +43,72 @@ const App = {
             return;
         }
 
+        // Check if user is logged in
+        this.checkAuthStatus();
+
         this.setupBuildingSelector();
         this.loadAllBuildings();
         
         console.log('[App] Application initialized successfully');
+    },
+
+    checkAuthStatus() {
+        const token = localStorage.getItem('adminToken');
+        const username = localStorage.getItem('adminUsername');
+        const isAdmin = localStorage.getItem('isAdmin') === 'true';
+
+        if (token && username) {
+            // User is logged in
+            console.log('[App] User is logged in:', username);
+            
+            // Hide login link, show logout button and user info
+            if (this.elements.loginLink) this.elements.loginLink.style.display = 'none';
+            if (this.elements.logoutBtn) this.elements.logoutBtn.style.display = 'inline-block';
+            if (this.elements.userInfo) this.elements.userInfo.style.display = 'inline';
+            if (this.elements.currentUsername) {
+                this.elements.currentUsername.textContent = `${username}${isAdmin ? ' (Admin)' : ''}`;
+            }
+
+            // Setup logout button
+            if (this.elements.logoutBtn) {
+                this.elements.logoutBtn.onclick = () => this.logout();
+            }
+
+            // If admin, show admin link (change to "Admin Panel")
+            if (isAdmin && this.elements.loginLink) {
+                this.elements.loginLink.style.display = 'inline-block';
+                this.elements.loginLink.textContent = '⚙️ Admin Panel';
+                this.elements.loginLink.href = '/admin';
+            }
+        } else {
+            // User is not logged in
+            console.log('[App] User is not logged in');
+            
+            // Show login link, hide logout button and user info
+            if (this.elements.loginLink) {
+                this.elements.loginLink.style.display = 'inline-block';
+                this.elements.loginLink.textContent = '⚙️ Admin Login';
+                this.elements.loginLink.href = '/login';
+            }
+            if (this.elements.logoutBtn) this.elements.logoutBtn.style.display = 'none';
+            if (this.elements.userInfo) this.elements.userInfo.style.display = 'none';
+        }
+    },
+
+    logout() {
+        if (confirm('Are you sure you want to logout?')) {
+            console.log('[App] Logging out...');
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminUsername');
+            localStorage.removeItem('isAdmin');
+            
+            this.showNotification('Logged out successfully', false);
+            
+            // Redirect to login page after a short delay
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 1000);
+        }
     },
 
     showNotification(text, isError = false, timeout = 3000) {
